@@ -413,7 +413,7 @@ class MainActivity : Activity() {
     private fun action(value: String, callback: () -> Unit): TextView =
         textView(value, 12f, accent, true).apply {
             gravity = Gravity.CENTER
-            background = shape(surface, dp(14))
+            setBackground(shape(surface, dp(14)))
             setOnClickListener { callback() }
         }
 
@@ -432,7 +432,7 @@ class MainActivity : Activity() {
     private fun panel(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(16), dp(13), dp(16), dp(13))
-        background = shape(surface, dp(17))
+        setBackground(shape(surface, dp(17)))
     }
 
     private fun shape(color: Int, radius: Int) = GradientDrawable().apply {
