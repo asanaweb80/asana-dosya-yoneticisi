@@ -120,6 +120,7 @@ class MainActivity : Activity() {
             title("Dosyalarım", 19f, foreground)
             text("Seçilen klasör: " + (current?.name ?: "Bilinmiyor"), 12f, secondary)
         }
+        if (category == null && sourceFilter == null && history.isEmpty()) favoritesPanel()
         searchPanel()
         if (category == null) sourceButtons()
         fileItems()
@@ -252,8 +253,17 @@ class MainActivity : Activity() {
     private fun fileTile(file: DocumentFile): LinearLayout {
         val panel = panel()
         val name = file.name ?: "Adsız"
-        panel.addView(textView((if (file.isDirectory) "📁 " else "📄 ") + name, 14f, foreground, true))
+        panel.addView(textView((if (favorites().contains(file.uri.toString())) "★ " else "") + (if (file.isDirectory) "📁 " else "📄 ") + name, 14f, foreground, true))
         panel.addView(textView(if (file.isDirectory) "Klasör" else size(file.length()), 12f, secondary, false))
+        panel.setOnLongClickListener {
+            val uri = file.uri.toString()
+            val saved = favorites().toMutableSet()
+            val added = if (saved.contains(uri)) { saved.remove(uri); false } else { saved.add(uri); true }
+            getPreferences(MODE_PRIVATE).edit().putStringSet("favorites", saved).apply()
+            Toast.makeText(this, if (added) "Favorilere eklendi" else "Favorilerden çıkarıldı", Toast.LENGTH_SHORT).show()
+            render()
+            true
+        }
         panel.setOnClickListener {
             if (file.isDirectory) {
                 current?.let { history.add(it) }
@@ -266,6 +276,37 @@ class MainActivity : Activity() {
         return panel
     }
 
+    private fun favorites(): Set<String> = getPreferences(MODE_PRIVATE)
+        .getStringSet("favorites", emptySet())?.toSet() ?: emptySet()
+
+    private fun favoritesPanel() {
+        title("★ Sabitlenenler", 18f, foreground)
+        val saved = favorites()
+        if (saved.isEmpty()) {
+            text("Dosyaya veya klasöre uzun basarak favorilere ekleyin.", 12f, secondary)
+            return
+        }
+        saved.take(12).forEach { id ->
+            val document = try { DocumentFile.fromSingleUri(this, Uri.parse(id)) } catch (_: Exception) { null }
+            val name = try { document?.name ?: "Erişilemeyen öğe" } catch (_: Exception) { "Erişilemeyen öğe" }
+            content.addView(action("★ " + name) {
+                try {
+                    if (document == null || !document.exists()) {
+                        Toast.makeText(this, "Dosyaya erişilemiyor. Yeniden klasör izni verin.", Toast.LENGTH_LONG).show()
+                    } else if (document.isDirectory) {
+                        current = document
+                        history.clear()
+                        category = null
+                        sourceFilter = null
+                        render()
+                    } else open(document)
+                } catch (_: Exception) {
+                    Toast.makeText(this, "Favori açılamadı", Toast.LENGTH_LONG).show()
+                }
+            }, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(5) })
+        }
+        text("Favoriyi kaldırmak için dosya listesinde öğeye uzun basın.", 11f, secondary)
+    }
     private fun searchPanel() {
         title("Gelişmiş arama", 18f, foreground)
         val name = EditText(this).apply { hint = "Dosya adı"; setSingleLine(true); setText(query) }
