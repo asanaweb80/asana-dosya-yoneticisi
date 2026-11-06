@@ -13,6 +13,7 @@ import android.os.Environment
 import android.os.StatFs
 import android.view.Gravity
 import android.view.View
+import android.widget.EditText
 import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -31,6 +32,10 @@ class MainActivity : Activity() {
     private var current: DocumentFile? = null
     private val history = mutableListOf<DocumentFile>()
     private var category: String? = null
+    private var query = ""
+    private var suffix = ""
+    private var minimumMb = 0L
+    private var sourceFilter: String? = null
     private var grid = false
     private var mode = 0  // 0 system, 1 light, 2 AMOLED
     private var accent = Color.rgb(0, 112, 121)
@@ -104,8 +109,8 @@ class MainActivity : Activity() {
             categoryCards()
             return
         }
-        if (category != null) {
-            rowTitle("Kategori: " + category, "← Geri") { category = null; render() }
+        if (category != null || sourceFilter != null) {
+            rowTitle("Filtre: " + (sourceFilter ?: category), "← Geri") { category = null; sourceFilter = null; render() }
         } else if (history.isNotEmpty()) {
             rowTitle(current?.name ?: "Klasör", "← Üst klasör") { goBack() }
         } else {
@@ -115,7 +120,10 @@ class MainActivity : Activity() {
             title("Dosyalarım", 19f, foreground)
             text("Seçilen klasör: " + (current?.name ?: "Bilinmiyor"), 12f, secondary)
         }
+        searchPanel()
+        if (category == null) sourceButtons()
         fileItems()
+        if (category == null) analysisButton()
         space(12)
         text("v0.1 • Dosyalar salt okunur • Kategoriler seçili klasör kapsamındadır", 11f, secondary)
     }
@@ -178,7 +186,7 @@ class MainActivity : Activity() {
                 val tile = panel().apply {
                     setOnClickListener {
                         if (current == null) Toast.makeText(this@MainActivity, "Önce klasör seçin", Toast.LENGTH_SHORT).show()
-                        else { category = item.second; render() }
+                        else { sourceFilter = null; category = item.second; render() }
                     }
                 }
                 tile.addView(textView(item.first, 29f, Color.parseColor(item.third), true))
@@ -194,7 +202,7 @@ class MainActivity : Activity() {
     private fun fileItems() {
         val dir = current ?: return
         val entries = try {
-            dir.listFiles().filter { accepts(it) }.sortedWith(
+            (if (sourceFilter == null) dir.listFiles().toList() else SafeFileScanner.walk(dir).filter { it.first.contains(sourceFilter!!, true) }.map { it.second }).filter { accepts(it) && SafeFileScanner.matches(it, query, suffix, minimumMb * 1024L * 1024L) }.sortedWith(
                 compareBy<DocumentFile> { !it.isDirectory }.thenBy { it.name?.lowercase(Locale.forLanguageTag("tr")) ?: "" }
             )
         } catch (_: Exception) {
@@ -251,12 +259,56 @@ class MainActivity : Activity() {
                 current?.let { history.add(it) }
                 current = file
                 category = null
+                sourceFilter = null
                 render()
             } else open(file)
         }
         return panel
     }
 
+    private fun searchPanel() {
+        title("Gelişmiş arama", 18f, foreground)
+        val name = EditText(this).apply { hint = "Dosya adı"; setSingleLine(true); setText(query) }
+        val ext = EditText(this).apply { hint = "Uzantı: pdf, mp4, xlsx"; setSingleLine(true); setText(suffix) }
+        val mb = EditText(this).apply { hint = "Minimum boyut (MB)"; inputType = 2; setText(if (minimumMb > 0) minimumMb.toString() else "") }
+        content.addView(name); content.addView(ext); content.addView(mb)
+        content.addView(action("Filtreleri uygula") {
+            query = name.text.toString().trim(); suffix = ext.text.toString().trim()
+            minimumMb = (mb.text.toString().toLongOrNull() ?: 0L).coerceIn(0L, 1000000L)
+            render()
+        }, LinearLayout.LayoutParams(-1, dp(46)))
+        text("Arama açık klasörle sınırlıdır.", 11f, secondary)
+    }
+
+    private fun sourceButtons() {
+        title("Kaynağa göre", 18f, foreground)
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf("WhatsApp", "Telegram", "Download").forEach { source ->
+            row.addView(action(source) { sourceFilter = source; category = null; render() }, LinearLayout.LayoutParams(0, dp(45), 1f))
+        }
+        content.addView(row)
+        text("Kaynaklar yalnızca izin verilen klasör ağacında aranır.", 11f, secondary)
+    }
+
+    private fun analysisButton() {
+        content.addView(action("Depolama analizi (silme yok)") {
+            val folder = grantedRoot ?: return@action
+            Toast.makeText(this, "İzinli klasörler taranıyor", Toast.LENGTH_SHORT).show()
+            Thread {
+                val files = SafeFileScanner.walk(folder, 2000)
+                val result = SafeFileScanner.report(files)
+                runOnUiThread {
+                    val message = "Taranan kayıt: " + result.indexed +
+                        "\n100 MB üzeri: " + result.large +
+                        "\n90 günden eski APK: " + result.oldApks +
+                        "\nBoş klasör: " + result.emptyFolders +
+                        "\n\nHiçbir dosya silinmedi. Tekrarlayan fotoğraf analizi henüz eklenmedi."
+                    android.app.AlertDialog.Builder(this).setTitle("Depolama analizi")
+                        .setMessage(message).setPositiveButton("Tamam", null).show()
+                }
+            }.start()
+        }, LinearLayout.LayoutParams(-1, dp(50)))
+    }
     private fun pickFolder() {
         try {
             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
@@ -277,6 +329,7 @@ class MainActivity : Activity() {
             grantedRoot = DocumentFile.fromTreeUri(this, uri)
             current = grantedRoot
             category = null
+            sourceFilter = null
             history.clear()
             getPreferences(MODE_PRIVATE).edit().putString("folder_uri", uri.toString()).apply()
             render()
@@ -297,14 +350,14 @@ class MainActivity : Activity() {
     }
 
     private fun goBack() {
-        if (category != null) category = null
+        if (category != null || sourceFilter != null) { category = null; sourceFilter = null }
         else if (history.isNotEmpty()) current = history.removeAt(history.lastIndex)
         render()
     }
 
     @Deprecated("Back navigation across Android 8+")
     override fun onBackPressed() {
-        if (category != null || history.isNotEmpty()) goBack() else super.onBackPressed()
+        if (category != null || sourceFilter != null || history.isNotEmpty()) goBack() else super.onBackPressed()
     }
 
     private fun size(bytes: Long): String {
