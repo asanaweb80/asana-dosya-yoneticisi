@@ -27,6 +27,13 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Install ASANA launcher icon
+        shell: bash
+        run: |
+          mkdir -p app/src/main/res/drawable-nodpi
+          base64 --decode app/icon-source/asana-icon.webp.base64 > app/src/main/res/drawable-nodpi/asana_logo.webp
+          file app/src/main/res/drawable-nodpi/asana_logo.webp
+          test -s app/src/main/res/drawable-nodpi/asana_logo.webp
       - name: Lint and assemble debug APK
         run: gradle --no-daemon :app:lintDebug :app:assembleDebug
       - name: Upload APK
